@@ -1,6 +1,5 @@
 # Terraform local state and cache — never commit these
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.backup
 *.tfstate.*.backup
@@ -12,6 +11,10 @@ tfplan
 
 # Sensitive outputs
 terraform.tfvars.json
+
+# Claude Code — keep locally, never push to GitHub
+CLAUDE.md
+.claude/
 
 # OS files
 .DS_Store
