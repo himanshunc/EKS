@@ -190,7 +190,10 @@ module "cluster_defaults" {
   # App-specific allow-ingress/egress policies live in k8s/apps/*/networkpolicy.yaml.
   extra_namespaces = ["apps"]
 
-  depends_on = [module.eks_addons]
+  # Must wait for the GitHub Actions Terraform role to have EKS RBAC access.
+  # Without this, CI apply fails with Unauthorized on Kubernetes resources because
+  # the access entry and Kubernetes changes are applied in parallel.
+  depends_on = [module.eks_addons, aws_eks_access_policy_association.github_actions_terraform]
 }
 
 # --- Step 10: Helm Addons ---
