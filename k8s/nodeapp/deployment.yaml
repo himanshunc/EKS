@@ -16,7 +16,7 @@ spec:
       containers:
         - name: nodeapp
           # IMAGE IS UPDATED AUTOMATICALLY BY CI
-                    image: 500849274222.dkr.ecr.ap-south-1.amazonaws.com/gitops-dev-worker:6ccf589
+          image: 500849274222.dkr.ecr.ap-south-1.amazonaws.com/gitops-dev-worker:6ccf589
           ports:
             - containerPort: 3000
           env:

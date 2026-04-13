@@ -42,7 +42,7 @@ jobs:
 
       - name: Update manifest
         run: |
-          sed -i "s|image: .*gitops-dev-worker:.*|          image: ${{ env.IMAGE_FULL }}|" k8s/nodeapp/deployment.yaml
+          sed -i "s|image: .*gitops-dev-worker:.*|image: ${{ env.IMAGE_FULL }}|" k8s/nodeapp/deployment.yaml
           sed -i "s|value: \".*\"  # APP_VERSION|value: \"${{ env.IMAGE_TAG }}\"|" k8s/nodeapp/deployment.yaml
 
       - name: Commit and push
