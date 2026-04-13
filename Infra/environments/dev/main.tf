@@ -155,6 +155,32 @@ module "eks_addons" {
   depends_on = [module.node_groups]
 }
 
+# --- EKS Access Entry: GitHub Actions Terraform CI ---
+# Grants the Terraform CI role cluster-admin access to EKS so it can manage
+# Kubernetes resources (namespaces, PDBs, NetworkPolicies) during terraform apply.
+# Without this, the Kubernetes provider gets "Unauthorized" even though the IAM
+# role has AdministratorAccess — EKS RBAC is separate from IAM permissions.
+
+resource "aws_eks_access_entry" "github_actions_terraform" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = module.iam.github_actions_terraform_role_arn
+  type          = "STANDARD"
+
+  depends_on = [module.eks, module.iam]
+}
+
+resource "aws_eks_access_policy_association" "github_actions_terraform" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = module.iam.github_actions_terraform_role_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.github_actions_terraform]
+}
+
 # --- Step 9: Cluster Defaults ---
 
 module "cluster_defaults" {
