@@ -13,15 +13,15 @@ terraform {
     bucket         = "myapp-terraform-state-500849274222"
 
     # State file path — one per environment, keeps state isolated
-    key = "envs/dev/terraform.tfstate"
+    key            = "envs/dev/terraform.tfstate"
 
     # Region — must match where the bootstrap bucket was created
-    region = "ap-south-1"
+    region         = "ap-south-1"
 
     # DynamoDB table — from bootstrap output: dynamodb_table_name
     dynamodb_table = "myapp-terraform-locks"
 
     # Encrypt state at rest in S3 — always true
-    encrypt = true
+    encrypt        = true
   }
 }
