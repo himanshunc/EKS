@@ -47,17 +47,16 @@ jobs:
         working-directory: Infra/environments/dev
 
       - name: Terraform plan
-        id: plan
-        run: terraform plan -no-color
+        run: terraform plan -no-color 2>&1 | tee /tmp/tfplan.txt
         working-directory: Infra/environments/dev
 
       # Post plan to the workflow summary so the approver can review it
       # before clicking Approve in the apply job below.
       - name: Post plan to summary
         run: |
-          echo '### Terraform Plan Output' >> $GITHUB_STEP_SUMMARY
-          echo '```terraform' >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.plan.outputs.stdout }}" >> $GITHUB_STEP_SUMMARY
+          echo '### Terraform Plan' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/tfplan.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   # ── Job 2: Apply ───────────────────────────────────────────────────────────
