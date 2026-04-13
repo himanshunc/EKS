@@ -2,9 +2,9 @@
 # Remote State Backend — S3 + DynamoDB
 #
 # HOW TO USE:
-#   1. Run infra/bootstrap/ first (terraform apply)
+#   1. Run Infra/bootstrap/ first (terraform apply)
 #   2. Copy the outputs into the values below
-#   3. Run `terraform init` in infra/environments/dev (or prod)
+#   3. Run `terraform init` in Infra/environments/dev (or prod)
 # ─────────────────────────────────────────────────────────────────────────────
 
 terraform {
