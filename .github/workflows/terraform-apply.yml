@@ -1,14 +1,13 @@
 name: Terraform Apply
 
 # Runs when infra changes are merged/pushed to main.
-# Flow: init + plan → wait for manual approval → apply
+# Flow: plan → upload plan artifact → wait for manual approval → download artifact → apply exact plan
 #
-# The "plan" job runs first and posts the plan output as a summary.
-# The "apply" job is gated behind the "production" GitHub Environment —
-# go to Actions → this run → Review deployments → Approve to proceed.
-#
-# Setup: GitHub repo → Settings → Environments → production
-#        Add yourself as a required reviewer.
+# The "plan" job saves a binary plan file and posts it as a workflow summary.
+# The "apply" job downloads that exact plan file — no re-planning, no surprises.
+# The "apply" job is gated behind the "production" GitHub Environment:
+#   GitHub repo → Settings → Environments → production → add yourself as required reviewer
+#   Actions → this run → Review deployments → Approve to proceed.
 
 on:
   push:
@@ -19,8 +18,8 @@ on:
 jobs:
 
   # ── Job 1: Plan ────────────────────────────────────────────────────────────
-  # Runs terraform init + plan and posts the output as a workflow summary.
-  # No AWS changes are made at this stage.
+  # Runs terraform init + plan, saves the plan binary as an artifact, and posts
+  # the human-readable output as a workflow summary for the approver to review.
   plan:
     name: terraform plan
     runs-on: ubuntu-latest
@@ -47,12 +46,23 @@ jobs:
         run: terraform init
         working-directory: Infra/environments/dev
 
+      # Save the plan to a binary file — this is what apply will execute exactly.
+      # The text output is tee'd so we can post it to the summary below.
       - name: Terraform plan
-        run: terraform plan -no-color 2>&1 | tee /tmp/tfplan.txt
+        run: terraform plan -out=tfplan.binary -no-color 2>&1 | tee /tmp/tfplan.txt
         working-directory: Infra/environments/dev
 
-      # Post plan to the workflow summary so the approver can review it
-      # before clicking Approve in the apply job below.
+      # Upload the binary plan so the apply job can download and use it.
+      # This guarantees apply runs the exact plan the approver reviewed.
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: Infra/environments/dev/tfplan.binary
+          retention-days: 3
+
+      # Post human-readable plan to the workflow summary so the approver can
+      # review it before clicking Approve in the apply job below.
       - name: Post plan to summary
         run: |
           echo '### Terraform Plan' >> $GITHUB_STEP_SUMMARY
@@ -62,12 +72,14 @@ jobs:
 
   # ── Job 2: Apply ───────────────────────────────────────────────────────────
   # Waits for manual approval via the "production" GitHub Environment.
-  # Approver should review the plan summary above before approving.
+  # Downloads the exact binary plan from Job 1 — no re-plan, what you saw is
+  # what gets applied.
   apply:
     name: terraform apply
     runs-on: ubuntu-latest
-    needs: plan          # only runs after plan job completes successfully
+    needs: plan
     environment: production   # pauses here — reviewer clicks Approve in GitHub UI
+
     permissions:
       id-token: write
       contents: read
@@ -91,9 +103,15 @@ jobs:
         run: terraform init
         working-directory: Infra/environments/dev
 
-      # -auto-approve is correct here — the human approval already happened
-      # via the GitHub Environment gate above. This flag just skips the
-      # interactive "yes/no" prompt inside terraform itself.
+      # Download the binary plan saved by the plan job.
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: Infra/environments/dev
+
+      # Apply the exact saved plan — no -auto-approve needed when passing a plan file,
+      # and no re-planning occurs. What the approver reviewed is exactly what runs.
       - name: Terraform apply
-        run: terraform apply -auto-approve
+        run: terraform apply tfplan.binary
         working-directory: Infra/environments/dev
