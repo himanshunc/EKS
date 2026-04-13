@@ -1,0 +1,59 @@
+name: CI — Nodeapp
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/nodeapp/**"
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          IMAGE="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/gitops-dev-worker"
+
+          docker build -t ${IMAGE}:${SHA} -t ${IMAGE}:latest apps/nodeapp/
+          docker push ${IMAGE}:${SHA}
+          docker push ${IMAGE}:latest
+
+          echo "IMAGE_TAG=${SHA}" >> $GITHUB_ENV
+          echo "IMAGE_FULL=${IMAGE}:${SHA}" >> $GITHUB_ENV
+
+      - name: Update manifest
+        run: |
+          sed -i "s|image: .*gitops-dev-worker:.*|          image: ${{ env.IMAGE_FULL }}|" k8s/nodeapp/deployment.yaml
+          sed -i "s|value: \".*\"  # APP_VERSION|value: \"${{ env.IMAGE_TAG }}\"|" k8s/nodeapp/deployment.yaml
+
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/nodeapp/deployment.yaml
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "ci: deploy nodeapp ${{ env.IMAGE_TAG }} [skip ci]"
+            git pull --rebase origin main
+            git push origin main
+          fi
