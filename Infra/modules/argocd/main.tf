@@ -9,14 +9,63 @@
 # (examples/argocd-app.yaml shows the pattern) or use kubectl port-forward.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─── ArgoCD-specific NetworkPolicy ───────────────────────────────────────────
+
+# Allow all egress from the argocd namespace.
+# ArgoCD needs to reach GitHub (HTTPS 443) to pull manifests and the Kubernetes
+# API server to apply resources. Rather than enumerate all targets, allow all
+# outbound — this is standard practice for GitOps controllers.
+resource "kubernetes_network_policy" "argocd_allow_egress" {
+  metadata {
+    name      = "allow-egress-argocd"
+    namespace = "argocd"
+  }
+
+  spec {
+    pod_selector {}
+    policy_types = ["Egress"]
+    egress {}
+  }
+
+  depends_on = [helm_release.argocd]
+}
+
+# ─── PodDisruptionBudget ──────────────────────────────────────────────────────
+
+# PDB for ArgoCD server — ensures GitOps stays available during node drains.
+resource "kubernetes_pod_disruption_budget_v1" "argocd_server" {
+  metadata {
+    name      = "argocd-server-pdb"
+    namespace = "argocd"
+  }
+
+  spec {
+    min_available = "1"
+
+    selector {
+      match_labels = {
+        "app.kubernetes.io/name" = "argocd-server"
+      }
+    }
+  }
+
+  depends_on = [helm_release.argocd]
+}
+
+# ─── Helm Release ─────────────────────────────────────────────────────────────
+
 # ArgoCD — GitOps continuous delivery tool for Kubernetes.
 # chart = "argo-cd" is the official Helm chart maintained by the ArgoCD project.
+# create_namespace = true — Helm creates and owns the argocd namespace.
+# On destroy, scripts/destroy.ps1 strips Application finalizers and deletes
+# the namespace after helm uninstall, preventing it from getting stuck in Terminating.
 resource "helm_release" "argocd" {
-  name       = "argocd"
-  repository = "https://argoproj.github.io/argo-helm"
-  chart      = "argo-cd"
-  namespace  = "argocd"
-  version    = "6.7.3"
+  name             = "argocd"
+  repository       = "https://argoproj.github.io/argo-helm"
+  chart            = "argo-cd"
+  namespace        = "argocd"
+  version          = "6.7.3"
+  create_namespace = true
 
   # Wait for all pods to be ready before marking the release as deployed
   wait    = true
@@ -118,4 +167,5 @@ resource "helm_release" "argocd" {
     name  = "repoServer.resources.requests.memory"
     value = "128Mi"
   }
+
 }

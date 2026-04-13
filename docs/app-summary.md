@@ -4,45 +4,32 @@
 
 ## What We Built
 
-Two sample apps running inside the EKS cluster, exposed to the internet via a single AWS Load Balancer.
+A simple Node.js app running inside the EKS cluster, exposed to the internet via an AWS Application Load Balancer.
 
 ```
 Internet
     │
     ▼
-AWS ALB (one load balancer, two apps)
+AWS ALB (internet-facing)
     │
-    ├── /api/*   ──►  API pod       (Go HTTP server, port 8080)
-    └── /*       ──►  Frontend pod  (nginx serving HTML, port 80)
+    └── /*  ──►  nodeapp pod (Node.js HTTP server, port 3000)
 ```
-
-The frontend page calls `/api/` in the browser. The ALB routes that call to the API pod.
-You see the API version badge update every time CI deploys a new version.
 
 ---
 
-## The Two Apps
+## The App
 
-### API (`apps/api/`)
+### nodeapp (`apps/nodeapp/`)
 
-A minimal Go HTTP server. Two endpoints:
+A minimal Node.js HTTP server with no dependencies. Two endpoints:
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /` | Returns JSON: message, version (git SHA), timestamp, status |
-| `GET /health` | Returns `ok` — used by ALB and Kubernetes to check the pod is alive |
+| `GET /` | Returns JSON: message, version (git SHA), request path |
+| `GET /health` | Returns `ok` — used by ALB and Kubernetes readiness probe |
 
-The `APP_VERSION` environment variable is set by CI to the git SHA of the commit that built the image.
-This is how you can see exactly which commit is running — open `/api/` and read the `version` field.
-
-### Frontend (`apps/frontend/`)
-
-A static HTML page served by nginx. It:
-1. Fetches `/api/` using JavaScript
-2. Displays the API response and version badge on the page
-3. Shows both services as "Running" when healthy
-
-nginx also exposes `/health` for the ALB health check.
+`APP_VERSION` is set by CI to the short git SHA of the commit that built the image.
+Open the ALB URL and read the `version` field to confirm which commit is running.
 
 ---
 
@@ -52,165 +39,123 @@ nginx also exposes `/health` for the ALB health check.
 eks-claude/
 │
 ├── apps/
-│   ├── api/
-│   │   ├── main.go       ← Go source code
-│   │   ├── go.mod        ← Go module definition
-│   │   └── Dockerfile    ← how to build the container image
-│   │
-│   └── frontend/
-│       ├── index.html    ← the web page
-│       ├── nginx.conf    ← nginx config (routes + /health)
-│       └── Dockerfile    ← how to build the container image
+│   └── nodeapp/
+│       ├── server.js      ← Node.js source code
+│       ├── package.json   ← app metadata (no dependencies)
+│       └── Dockerfile     ← how to build the container image
 │
 ├── k8s/
-│   └── apps/
-│       ├── namespace.yaml         ← creates the "apps" namespace
-│       ├── ingress.yaml           ← ALB config (path routing rules)
-│       ├── api/
-│       │   ├── deployment.yaml    ← how many pods, which image, resource limits
-│       │   ├── service.yaml       ← internal DNS name for the api pods
-│       │   └── networkpolicy.yaml ← firewall rules for the api pods
-│       └── frontend/
-│           ├── deployment.yaml
-│           ├── service.yaml
-│           └── networkpolicy.yaml
+│   └── nodeapp/
+│       ├── namespace.yaml    ← creates the "nodeapp" namespace
+│       ├── deployment.yaml   ← 2 pods, which image, resource limits, health probes
+│       ├── service.yaml      ← internal ClusterIP (ALB → pod via target-type: ip)
+│       └── ingress.yaml      ← ALB config (internet-facing, HTTP 80)
+│
+├── k8s/
+│   └── argocd/
+│       └── app-nodeapp.yaml  ← ArgoCD Application (applied once to bootstrap)
 │
 └── .github/
     └── workflows/
-        ├── ci-api.yml        ← CI pipeline for the API
-        └── ci-frontend.yml   ← CI pipeline for the frontend
+        └── ci-nodeapp.yml    ← CI pipeline (build → push → update manifest)
 ```
 
 ---
 
 ## How a Deployment Happens — Step by Step
 
-### Normal flow (every code change)
-
 ```
 Step 1 — You change code
-         Edit apps/api/main.go (e.g. change the message)
+         Edit apps/nodeapp/server.js
          git commit + git push origin main
 
-Step 2 — GitHub Actions triggers (ci-api.yml)
-         Trigger condition: push to main + file changed under apps/api/**
-         The workflow runs on a GitHub-hosted Ubuntu runner
+Step 2 — GitHub Actions triggers (ci-nodeapp.yml)
+         Trigger condition: push to main + file changed under apps/nodeapp/**
 
 Step 3 — CI authenticates to AWS (no passwords)
-         GitHub mints a short-lived OIDC token for this specific workflow run
-         AWS sees the token, checks it came from repo himanshunc/EKS
-         AWS hands back temporary credentials (expire in 1 hour)
+         GitHub mints a short-lived OIDC token for this workflow run
+         AWS exchanges it for temporary credentials (expire in 1 hour)
          No AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY stored anywhere
 
 Step 4 — CI builds the Docker image
-         docker build apps/api/
-         Tags it as: 500849274222.dkr.ecr.ap-south-1.amazonaws.com/gitops-dev-api:a1b2c3d
-         The tag is the short git SHA — unique per commit, traceable back to the code
+         docker build apps/nodeapp/
+         Tags it as: 500849274222.dkr.ecr.ap-south-1.amazonaws.com/gitops-dev-worker:<sha>
 
 Step 5 — CI pushes the image to ECR
-         docker push (both the SHA tag and "latest")
-         Image is now stored in AWS, accessible to your cluster nodes
+         docker push (SHA tag + "latest")
 
 Step 6 — CI updates the manifest
-         sed replaces the image line in k8s/apps/api/deployment.yaml:
-         Before: image: ...gitops-dev-api:old-sha
-         After:  image: ...gitops-dev-api:a1b2c3d
+         sed replaces the image line in k8s/nodeapp/deployment.yaml:
+         Before: image: ...gitops-dev-worker:old-sha
+         After:  image: ...gitops-dev-worker:new-sha
 
 Step 7 — CI commits and pushes the manifest change
-         git commit -m "ci: update api image to a1b2c3d"
+         git commit -m "ci: deploy nodeapp <sha> [skip ci]"
+         git pull --rebase origin main   ← handles parallel CI runs
          git push origin main
-         This commit does NOT re-trigger CI (it only touches k8s/, not apps/)
 
-Step 8 — ArgoCD detects the new commit (within 3 minutes)
-         ArgoCD polls GitHub every 3 minutes
-         It sees deployment.yaml has a new image tag
-         It runs kubectl apply on the updated manifest
+Step 8 — ArgoCD detects the new commit (within 3 minutes, or force refresh)
+         kubectl patch app nodeapp -n argocd -p '{"operation":{"sync":{"revision":"HEAD"}}}' --type merge
 
-Step 9 — Kubernetes rolls out the new version
-         Starts 1 new pod with the new image
-         Waits for /health to return 200 (readiness probe)
-         Only then removes the old pod
-         Result: zero downtime — traffic never drops
+Step 9 — Kubernetes rolls out the new version (zero downtime)
+         New pod starts with the new image
+         Readiness probe (/health) must pass before traffic shifts
+         Old pod is terminated only after new one is Ready
 
-Step 10 — Done
-          Open the browser → reload the page
-          The version badge now shows the new git SHA
-          You can verify which exact commit is running
+Step 10 — Confirm
+          Open the ALB URL in browser
+          "version" field shows the new git SHA
 ```
 
 ---
 
-## How ArgoCD Manages the Apps
+## How ArgoCD Manages the App
 
-ArgoCD watches three Application objects (applied once with kubectl):
+One ArgoCD Application object (applied once with kubectl):
 
-| ArgoCD App | Watches this path | Deploys to |
-|---|---|---|
-| `apps-ingress` | `k8s/apps/namespace.yaml` + `k8s/apps/ingress.yaml` | `apps` namespace |
-| `api` | `k8s/apps/api/` | `apps` namespace |
-| `frontend` | `k8s/apps/frontend/` | `apps` namespace |
+```
+k8s/argocd/app-nodeapp.yaml
+  │
+  └── watches: k8s/nodeapp/  in GitHub repo himanshunc/EKS
+        │
+        └── deploys to: nodeapp namespace in the cluster
+```
 
 **Key behaviours:**
-
-- `automated.prune: true` — if you delete a file from Git, ArgoCD deletes the resource from the cluster
-- `automated.selfHeal: true` — if someone manually runs `kubectl edit` to change something, ArgoCD reverts it within minutes
-- ArgoCD is the only thing that should change the cluster. Git is the source of truth.
+- `automated.prune: true` — resources removed from Git are deleted from the cluster
+- `automated.selfHeal: true` — manual `kubectl edit` changes are reverted by ArgoCD
+- `CreateNamespace=true` — ArgoCD creates the `nodeapp` namespace if it doesn't exist
 
 ---
 
 ## What Happens If ArgoCD Is Destroyed
 
-ArgoCD itself is stateless. The Application definitions live in Git (`k8s/argocd/`). The actual app manifests (Deployments, Services, etc.) still exist in the cluster — they are not deleted when ArgoCD goes down.
+ArgoCD is stateless. The nodeapp pods keep running — Kubernetes does not delete them.
 
-### Scenario 1: ArgoCD pod crashes / restarts
-Nothing bad happens. The pods keep running. ArgoCD restarts and re-syncs automatically.
-
-### Scenario 2: ArgoCD Helm release is deleted
-The ArgoCD pods stop. Your apps (api, frontend) keep running — Kubernetes does not delete them.
-No new deployments happen until ArgoCD is restored.
-
-**To restore:**
+**Restore ArgoCD:**
 ```powershell
-# Re-run Terraform — it will reinstall ArgoCD via Helm
 cd C:\Projects\eks-claude\Infra\environments\dev
 terraform apply -target=module.argocd -auto-approve
-
-# Re-apply the Application manifests
-kubectl apply -f k8s/argocd/app-ingress.yaml
-kubectl apply -f k8s/argocd/app-api.yaml
-kubectl apply -f k8s/argocd/app-frontend.yaml
+kubectl apply -f k8s/argocd/app-nodeapp.yaml
 ```
 
-ArgoCD re-reads the manifests from Git and syncs. Everything is back.
+ArgoCD re-reads the manifest from Git and syncs. Everything is back.
 
-### Scenario 3: Entire cluster is destroyed and rebuilt
-Apps are gone with the cluster. But Git has everything needed to recreate them.
-
-**To restore:**
+**Restore entire cluster from scratch:**
 ```powershell
-# 1. Re-apply full infra
-cd C:\Projects\eks-claude\Infra\environments\dev
 terraform apply -auto-approve
-
-# 2. Bootstrap ArgoCD apps
-kubectl apply -f k8s/argocd/app-ingress.yaml
-kubectl apply -f k8s/argocd/app-api.yaml
-kubectl apply -f k8s/argocd/app-frontend.yaml
-
-# 3. ArgoCD syncs — apps are running again
+kubectl apply -f k8s/argocd/app-nodeapp.yaml
+# ArgoCD syncs → app is running again
+# ECR image still exists — no need to re-run CI
 ```
-
-The ECR images still exist (lifecycle policy keeps last 10). The last deployed versions are
-restored immediately without re-running CI.
 
 ---
 
-## How to Roll Back a Bad Deployment
+## How to Roll Back
 
-### Option A: Git revert (recommended)
 ```powershell
-# Find the last good commit
-git log k8s/apps/api/deployment.yaml
+# Find the last good commit SHA in the manifest
+git log k8s/nodeapp/deployment.yaml
 
 # Revert the manifest to the previous image tag
 git revert HEAD
@@ -218,59 +163,29 @@ git push origin main
 # ArgoCD detects the revert → rolls back automatically
 ```
 
-### Option B: Manually edit the manifest
-```powershell
-# Edit k8s/apps/api/deployment.yaml
-# Change the image tag back to the previous SHA
-git commit -am "revert: roll back api to previous version"
-git push origin main
-```
-
-### Option C: kubectl rollout (bypasses GitOps — ArgoCD will re-sync and undo this)
-```powershell
-kubectl rollout undo deployment/api -n apps
-# WARNING: ArgoCD will revert this back to whatever is in Git within minutes
-# Use Option A or B if you want the rollback to stick
-```
-
 ---
 
 ## Useful Commands
 
 ```powershell
-# Check all apps are running
-kubectl get pods -n apps
+# Check pods are running
+kubectl get pods -n nodeapp
 
-# See which image is currently deployed
-kubectl get deployment api -n apps -o jsonpath="{.spec.template.spec.containers[0].image}"
+# See which image is deployed
+kubectl get deployment nodeapp -n nodeapp -o jsonpath="{.spec.template.spec.containers[0].image}"
 
 # Watch a rollout in real time
-kubectl rollout status deployment/api -n apps
+kubectl rollout status deployment/nodeapp -n nodeapp
 
-# Get the ALB URL (open in browser)
-kubectl get ingress -n apps
+# Get the ALB URL
+kubectl get ingress -n nodeapp
 
 # Check ArgoCD app status
 kubectl get applications -n argocd
 
-# Stream API pod logs
-kubectl logs -n apps -l app=api -f
+# Stream pod logs
+kubectl logs -n nodeapp -l app=nodeapp -f
 
-# Stream frontend pod logs
-kubectl logs -n apps -l app=frontend -f
-
-# Describe a pod (useful when it won't start)
-kubectl describe pod -n apps -l app=api
+# Describe a pod (when it won't start)
+kubectl describe pod -n nodeapp -l app=nodeapp
 ```
-
----
-
-## Security Notes
-
-| What | How it is protected |
-|---|---|
-| Docker images | Stored in private ECR — only your cluster nodes can pull them |
-| AWS credentials in CI | OIDC — no stored secrets, credentials expire in 1 hour |
-| Pod-to-pod traffic | Default-deny NetworkPolicy — api and frontend can't talk to each other unless explicitly allowed |
-| External traffic | Only port 80 via the ALB — pods are not directly reachable from the internet |
-| Resource limits | LimitRange prevents any pod from consuming all node CPU/memory |

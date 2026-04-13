@@ -40,6 +40,10 @@ resource "kubernetes_limit_range" "default" {
     namespace = each.value
   }
 
+  # Namespaces must exist before LimitRanges can be applied.
+  # default and kube-system always exist; monitoring/logging/apps are created above.
+  depends_on = [kubernetes_namespace.standard]
+
   spec {
     limit {
       type = "Container"
@@ -81,6 +85,8 @@ resource "kubernetes_network_policy" "default_deny" {
     namespace = each.value
   }
 
+  depends_on = [kubernetes_namespace.standard]
+
   spec {
     # Empty pod_selector = applies to ALL pods in the namespace
     pod_selector {}
@@ -102,6 +108,8 @@ resource "kubernetes_network_policy" "allow_dns_egress" {
     name      = "allow-dns-egress"
     namespace = each.value
   }
+
+  depends_on = [kubernetes_namespace.standard]
 
   spec {
     pod_selector {}
@@ -150,45 +158,5 @@ resource "kubernetes_pod_disruption_budget_v1" "coredns" {
   }
 }
 
-# Allow all egress from the argocd namespace.
-# ArgoCD needs to reach GitHub (HTTPS 443) to pull manifests and the Kubernetes
-# API server to apply resources. Rather than enumerate all targets, allow all
-# outbound — this is standard practice for GitOps controllers.
-resource "kubernetes_network_policy" "argocd_allow_egress" {
-  metadata {
-    name      = "allow-egress-argocd"
-    namespace = "argocd"
-  }
-
-  spec {
-    pod_selector {} # applies to all pods in argocd namespace
-
-    policy_types = ["Egress"]
-
-    egress {
-      # Allow all outbound — ArgoCD needs GitHub, Kubernetes API, Helm registries, etc.
-    }
-  }
-
-  depends_on = [kubernetes_namespace.standard["argocd"]]
-}
-
-# PDB for ArgoCD server — ensures GitOps stays available during maintenance.
-resource "kubernetes_pod_disruption_budget_v1" "argocd_server" {
-  metadata {
-    name      = "argocd-server-pdb"
-    namespace = "argocd"
-  }
-
-  spec {
-    min_available = "1"
-
-    selector {
-      match_labels = {
-        "app.kubernetes.io/name" = "argocd-server"
-      }
-    }
-  }
-
-  depends_on = [kubernetes_namespace.standard["argocd"]]
-}
+# NOTE: argocd namespace, NetworkPolicy, and PDB are managed by the argocd module.
+# They were moved there so everything ArgoCD-related destroys together as one unit.

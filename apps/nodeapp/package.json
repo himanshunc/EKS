@@ -4,6 +4,11 @@
   "description": "Simple Node.js app for GitOps CI/CD demo",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test":  "node --test",
+    "lint":  "eslint ."
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
   }
 }

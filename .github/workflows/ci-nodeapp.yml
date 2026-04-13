@@ -7,17 +7,47 @@ on:
       - "apps/nodeapp/**"
 
 permissions:
-  id-token: write
-  contents: write
+  id-token: write   # OIDC token for AWS auth
+  contents: write   # push manifest update back to main
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # ── Lint ──────────────────────────────────────────────────────────────────
+      # ESLint checks for syntax errors, undefined variables, and style issues.
+      # Runs before building to catch code problems cheaply.
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dev dependencies
+        run: npm install
+        working-directory: apps/nodeapp
+
+      - name: Lint
+        run: npm run lint
+        working-directory: apps/nodeapp
+
+      # ── Unit Tests ────────────────────────────────────────────────────────────
+      # Uses Node.js built-in test runner (node --test) — no extra packages needed.
+      # Tests call the handler function directly, no HTTP server required.
+
+      - name: Unit tests
+        run: npm test
+        working-directory: apps/nodeapp
+
+      # ── Build Docker image ────────────────────────────────────────────────────
+      # Build the image locally first so Trivy can scan it before it's pushed.
+      # Image is not pushed to ECR yet at this point.
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -28,22 +58,47 @@ jobs:
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push
+      - name: Build image
         run: |
           SHA=$(git rev-parse --short HEAD)
           IMAGE="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/gitops-dev-worker"
 
           docker build -t ${IMAGE}:${SHA} -t ${IMAGE}:latest apps/nodeapp/
-          docker push ${IMAGE}:${SHA}
-          docker push ${IMAGE}:latest
 
-          echo "IMAGE_TAG=${SHA}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${SHA}"   >> $GITHUB_ENV
           echo "IMAGE_FULL=${IMAGE}:${SHA}" >> $GITHUB_ENV
+          echo "IMAGE_LATEST=${IMAGE}:latest" >> $GITHUB_ENV
+
+      # ── Security Scan (Trivy) ─────────────────────────────────────────────────
+      # Scans the freshly built image for HIGH and CRITICAL CVEs.
+      # ignore-unfixed: true  — skips CVEs that have no patch available yet.
+      # exit-code: 1          — fails the build if any fixable HIGH/CRITICAL found.
+      # The push step below only runs if this step passes.
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref:      ${{ env.IMAGE_FULL }}
+          format:         table
+          exit-code:      '1'
+          ignore-unfixed: true
+          severity:       'HIGH,CRITICAL'
+
+      # ── Push to ECR ───────────────────────────────────────────────────────────
+      # Only reached if lint, tests, and Trivy scan all passed.
+
+      - name: Push image to ECR
+        run: |
+          docker push ${{ env.IMAGE_FULL }}
+          docker push ${{ env.IMAGE_LATEST }}
+
+      # ── Update manifest ───────────────────────────────────────────────────────
+      # Replaces the image tag in deployment.yaml with the new SHA.
+      # ArgoCD detects this commit and rolls out the new version automatically.
 
       - name: Update manifest
         run: |
           sed -i "s|image: .*gitops-dev-worker:.*|image: ${{ env.IMAGE_FULL }}|" k8s/nodeapp/deployment.yaml
-          sed -i "s|value: \".*\"  # APP_VERSION|value: \"${{ env.IMAGE_TAG }}\"|" k8s/nodeapp/deployment.yaml
 
       - name: Commit and push
         run: |
@@ -51,7 +106,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add k8s/nodeapp/deployment.yaml
           if git diff --staged --quiet; then
-            echo "No changes"
+            echo "No manifest changes — skipping commit"
           else
             git commit -m "ci: deploy nodeapp ${{ env.IMAGE_TAG }} [skip ci]"
             git pull --rebase origin main
