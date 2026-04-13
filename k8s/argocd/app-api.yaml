@@ -1,0 +1,35 @@
+# ArgoCD Application — API service
+#
+# Apply once to bootstrap GitOps for the API:
+#   kubectl apply -f k8s/argocd/app-api.yaml -n argocd
+#
+# After this, every git push that changes k8s/apps/api/ is automatically
+# picked up by ArgoCD and applied to the cluster (no manual kubectl needed).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api
+  namespace: argocd  # ArgoCD Application objects always live in the argocd namespace
+  # Finalizer ensures ArgoCD cleans up cluster resources when this Application is deleted.
+  # Remove it if you want to delete the Application object without deleting the k8s resources.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # Update this to your actual GitHub repo URL before applying
+    repoURL: https://github.com/himanshunc/EKS.git
+    targetRevision: main       # branch to sync from
+    path: k8s/apps/api         # folder containing the API manifests
+
+  destination:
+    server: https://kubernetes.default.svc  # same cluster ArgoCD runs in
+    namespace: apps
+
+  syncPolicy:
+    automated:
+      prune: true      # delete k8s resources that were removed from Git
+      selfHeal: true   # revert manual kubectl changes — Git is always the source of truth
+    syncOptions:
+      - CreateNamespace=true  # create the apps namespace if it doesn't exist yet

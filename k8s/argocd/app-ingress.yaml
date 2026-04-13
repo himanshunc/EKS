@@ -1,0 +1,36 @@
+# ArgoCD Application — Shared ALB Ingress
+#
+# Manages the single ALB Ingress that routes traffic to both API and Frontend.
+# Kept as a separate ArgoCD app so you can update routing rules independently
+# of the application deployments.
+#
+# Apply once:
+#   kubectl apply -f k8s/argocd/app-ingress.yaml -n argocd
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: apps-ingress
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # Update this to your actual GitHub repo URL before applying
+    repoURL: https://github.com/himanshunc/EKS.git
+    targetRevision: main
+    path: k8s/apps          # syncs namespace.yaml + ingress.yaml from this folder only
+    directory:
+      include: "{namespace.yaml,ingress.yaml}"  # only these two files, not subdirectories
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apps
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

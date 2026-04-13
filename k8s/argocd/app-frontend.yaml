@@ -1,0 +1,30 @@
+# ArgoCD Application — Frontend service
+#
+# Apply once to bootstrap GitOps for the frontend:
+#   kubectl apply -f k8s/argocd/app-frontend.yaml -n argocd
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: frontend
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # Update this to your actual GitHub repo URL before applying
+    repoURL: https://github.com/himanshunc/EKS.git
+    targetRevision: main
+    path: k8s/apps/frontend
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apps
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
