@@ -83,6 +83,9 @@ jobs:
             echo "No manifest changes to commit"
           else
             git commit -m "ci: update frontend image to ${{ steps.meta.outputs.sha }} [skip ci]"
+            # Pull latest before pushing — prevents non-fast-forward rejection when
+            # ci-api and ci-frontend run in parallel and both try to push to main.
+            git pull --rebase origin main
             git push origin main
             echo "Manifest updated — ArgoCD will sync shortly"
           fi
