@@ -33,7 +33,7 @@ spec:
       containers:
         - name: frontend
           # IMAGE TAG IS UPDATED AUTOMATICALLY BY CI — do not change manually
-          image: 000000000000.dkr.ecr.ap-south-1.amazonaws.com/gitops-dev-frontend:latest
+                    image: 500849274222.dkr.ecr.ap-south-1.amazonaws.com/gitops-dev-frontend:02d9353
           imagePullPolicy: Always
           ports:
             - containerPort: 80
