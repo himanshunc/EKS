@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ArgoCD Application Manifest — Sample
+#
+# This is the core GitOps pattern: Git is the single source of truth.
+# ArgoCD watches this repo and automatically syncs changes to the cluster.
+#
+# HOW TO USE:
+#   1. Fork/create your app repo with manifests in a k8s/ folder
+#   2. Update repoURL, path, and namespace below
+#   3. Apply: kubectl apply -f examples/argocd-app.yaml -n argocd
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: argocd  # ArgoCD always manages Application objects in its own namespace
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/your-org/your-app-repo  # your app's Git repo
+    targetRevision: main                                  # branch, tag, or commit SHA to sync from
+    path: k8s/                                            # folder containing your Kubernetes manifests
+
+  destination:
+    server: https://kubernetes.default.svc  # deploy to the same cluster ArgoCD runs in
+    namespace: my-app                        # target namespace for your app
+
+  syncPolicy:
+    automated:
+      prune: true      # delete resources that exist in cluster but are removed from Git
+      selfHeal: true   # revert any manual kubectl changes — Git always wins
+    syncOptions:
+      - CreateNamespace=true  # create the namespace if it doesn't exist

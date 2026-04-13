@@ -1,0 +1,42 @@
+repos:
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.88.0
+    hooks:
+      # terraform fmt — auto-format all .tf files before committing
+      - id: terraform_fmt
+        args:
+          - --args=-recursive
+
+      # terraform validate — catch syntax and type errors early
+      - id: terraform_validate
+        args:
+          - --init-args=-backend=false  # skip backend init in pre-commit
+
+      # tflint — Terraform linter: catches deprecated usage, best practice violations
+      - id: terraform_tflint
+        args:
+          - --args=--only=terraform_deprecated_interpolation
+          - --args=--only=terraform_deprecated_index
+          - --args=--only=terraform_unused_declarations
+          - --args=--only=terraform_comment_syntax
+          - --args=--only=terraform_documented_outputs
+          - --args=--only=terraform_documented_variables
+          - --args=--only=terraform_typed_variables
+          - --args=--only=terraform_module_pinned_source
+          - --args=--only=terraform_naming_convention
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      # Prevent accidental commit of large files (e.g. .terraform directory)
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+
+      # Prevent committing .tfstate files (should stay in S3)
+      - id: check-json
+
+      # Ensure files end with a newline
+      - id: end-of-file-fixer
+
+      # Remove trailing whitespace
+      - id: trailing-whitespace

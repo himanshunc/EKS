@@ -1,0 +1,24 @@
+# Terraform local state and cache — never commit these
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+tfplan
+
+# Local variable overrides — contain environment-specific secrets/values
+*.tfvars.local
+*.auto.tfvars
+
+# Sensitive outputs
+terraform.tfvars.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
