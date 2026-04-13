@@ -16,7 +16,8 @@ resource "aws_ecr_repository" "this" {
   for_each = toset(var.repository_names)
 
   name                 = "${local.name_prefix}-${each.value}"
-  image_tag_mutability = "MUTABLE" # allows re-tagging (e.g. "latest") — change to IMMUTABLE for stricter prod
+  image_tag_mutability = "MUTABLE"  # allows re-tagging (e.g. "latest") — change to IMMUTABLE for stricter prod
+  force_delete         = true       # allows destroy even when images exist — safe for dev, remove in prod
 
   # Scan on push — checks every image against the CVE database (ECR Basic scanning, free).
   # Results visible in the ECR console under "Image scan findings".

@@ -188,3 +188,38 @@ resource "aws_iam_role_policy_attachment" "github_actions_ecr" {
   role       = aws_iam_role.github_actions.name
   policy_arn = aws_iam_policy.github_actions_ecr.arn
 }
+
+# --- Terraform CI OIDC Role ---
+# Separate role for the terraform-plan and terraform-apply workflows.
+# Needs broad AWS permissions to create/destroy the full stack (EKS, VPC, IAM, etc.).
+# AdministratorAccess is used here for simplicity — tighten to specific services in prod.
+resource "aws_iam_role" "github_actions_terraform" {
+  name        = "${local.name_prefix}-github-actions-terraform"
+  description = "Role assumed by GitHub Actions Terraform CI via OIDC - plan and apply"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Federated = aws_iam_openid_connect_provider.github_actions.arn }
+      Action    = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+        }
+        StringLike = {
+          "token.actions.githubusercontent.com:sub" = "repo:${var.github_org}/${var.github_repo}:*"
+        }
+      }
+    }]
+  })
+
+  tags = var.tags
+}
+
+# AdministratorAccess — required to create/destroy EKS, VPC, IAM, KMS, ECR, ALB etc.
+# Scope this down to specific services if using this pattern in production.
+resource "aws_iam_role_policy_attachment" "github_actions_terraform" {
+  role       = aws_iam_role.github_actions_terraform.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}

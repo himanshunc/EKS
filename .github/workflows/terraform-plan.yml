@@ -1,76 +1,91 @@
 name: Terraform Plan
 
+# Runs on every PR that touches infra/ — posts the plan as a PR comment.
+# This gives reviewers a clear picture of what will change before merging.
+
 on:
   pull_request:
     branches: [main, develop]
-    paths: ["infra/**"]
+    paths: ["Infra/**"]
 
 jobs:
   plan:
-    name: Terraform Format + Validate + Plan
+    name: fmt + validate + plan
     runs-on: ubuntu-latest
     permissions:
-      id-token: write       # required for OIDC auth to AWS (no static keys)
+      id-token: write       # OIDC token for AWS auth (no static keys)
       contents: read
-      pull-requests: write  # allows posting the plan as a PR comment
+      pull-requests: write  # post plan output as a PR comment
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Terraform
+      - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.6.0"
 
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.TF_ROLE_ARN }}
           aws-region: ap-south-1
 
-      - name: Terraform Format Check
+      # ── Format check ──────────────────────────────────────────────────────
+      # Does not block — result is reported in the PR comment below.
+      - name: Terraform fmt
         id: fmt
         run: terraform fmt -check -recursive
-        working-directory: infra/environments/dev
-        continue-on-error: true  # report failure but don't block — comment shows result
-
-      - name: Terraform Init
-        id: init
-        run: terraform init
-        working-directory: infra/environments/dev
-
-      - name: Terraform Validate
-        id: validate
-        run: terraform validate -no-color
-        working-directory: infra/environments/dev
-
-      - name: Terraform Plan
-        id: plan
-        run: terraform plan -no-color -out=tfplan
-        working-directory: infra/environments/dev
+        working-directory: Infra/environments/dev
         continue-on-error: true
 
-      - name: Post plan as PR comment
+      # ── Init ──────────────────────────────────────────────────────────────
+      # Downloads providers and connects to the S3 backend.
+      # backend.tf is already committed in Infra/environments/dev/.
+      - name: Terraform init
+        id: init
+        run: terraform init
+        working-directory: Infra/environments/dev
+
+      # ── Validate ──────────────────────────────────────────────────────────
+      - name: Terraform validate
+        id: validate
+        run: terraform validate -no-color
+        working-directory: Infra/environments/dev
+
+      # ── Plan ──────────────────────────────────────────────────────────────
+      # continue-on-error so the PR comment is always posted even if plan fails.
+      - name: Terraform plan
+        id: plan
+        run: terraform plan -no-color -out=tfplan
+        working-directory: Infra/environments/dev
+        continue-on-error: true
+
+      # ── Post plan as PR comment ───────────────────────────────────────────
+      - name: Post plan to PR
         uses: actions/github-script@v7
         if: github.event_name == 'pull_request'
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const output = `#### Terraform Format 🖌 \`${{ steps.fmt.outcome }}\`
-            #### Terraform Init ⚙️ \`${{ steps.init.outcome }}\`
-            #### Terraform Validate 🤖 \`${{ steps.validate.outcome }}\`
-            #### Terraform Plan 📖 \`${{ steps.plan.outcome }}\`
+            const output = `### Terraform Plan
 
-            <details><summary>Show Plan</summary>
+            | Step | Result |
+            |------|--------|
+            | Format | \`${{ steps.fmt.outcome }}\` |
+            | Init   | \`${{ steps.init.outcome }}\` |
+            | Validate | \`${{ steps.validate.outcome }}\` |
+            | Plan   | \`${{ steps.plan.outcome }}\` |
+
+            <details><summary>Show full plan</summary>
 
             \`\`\`terraform
             ${{ steps.plan.outputs.stdout }}
             \`\`\`
-
             </details>
 
-            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            *Triggered by @${{ github.actor }} on \`${{ github.event_name }}\`*`;
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,

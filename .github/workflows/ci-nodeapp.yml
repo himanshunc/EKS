@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "apps/nodeapp/**"
+  workflow_dispatch:   # allows manual trigger from GitHub Actions UI
 
 permissions:
   id-token: write   # OIDC token for AWS auth
