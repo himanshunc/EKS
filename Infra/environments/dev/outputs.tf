@@ -71,3 +71,8 @@ output "github_actions_role_arn" {
   description = "IAM role ARN for GitHub Actions OIDC — add this as the AWS_ROLE_ARN secret in your GitHub repo settings"
   value       = module.iam.github_actions_role_arn
 }
+
+output "github_actions_terraform_role_arn" {
+  description = "IAM role ARN for Terraform CI — add this as the TF_ROLE_ARN secret in your GitHub repo settings"
+  value       = module.iam.github_actions_terraform_role_arn
+}
