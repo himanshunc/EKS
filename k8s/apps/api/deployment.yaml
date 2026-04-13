@@ -35,7 +35,7 @@ spec:
       containers:
         - name: api
           # IMAGE TAG IS UPDATED AUTOMATICALLY BY CI — do not change manually
-          image: 000000000000.dkr.ecr.ap-south-1.amazonaws.com/gitops-dev-api:latest
+                    image: 500849274222.dkr.ecr.ap-south-1.amazonaws.com/gitops-dev-api:355e55c
           imagePullPolicy: Always  # always pull — ensures latest tag is honoured
           ports:
             - containerPort: 8080
