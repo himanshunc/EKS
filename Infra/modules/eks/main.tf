@@ -33,6 +33,16 @@ resource "aws_eks_cluster" "this" {
   # Audit logs to CloudWatch - "audit" records every kubectl command and API call
   enabled_cluster_log_types = ["api", "audit", "authenticator"]
 
+  # Enable EKS Access Entry API alongside the legacy aws-auth ConfigMap.
+  # API_AND_CONFIG_MAP allows IAM roles to be granted cluster access via
+  # aws_eks_access_entry resources (Terraform-native, no ConfigMap editing needed).
+  # bootstrap_cluster_creator_admin_permissions = true automatically gives
+  # the IAM identity that creates the cluster full cluster-admin access.
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
   tags = var.tags
 }
 
