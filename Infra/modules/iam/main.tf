@@ -109,15 +109,10 @@ resource "aws_iam_role_policy_attachment" "amp_query" {
 # this IAM role trusts that token and grants ECR push permissions.
 # Docs: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
 
-# GitHub Actions OIDC provider — tells AWS to trust tokens signed by GitHub.
-# The thumbprint is the SHA-1 of GitHub's OIDC certificate; it rarely changes.
-resource "aws_iam_openid_connect_provider" "github_actions" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  # GitHub's OIDC certificate thumbprint — stable, sourced from GitHub docs.
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
-
-  tags = var.tags
+# GitHub Actions OIDC provider — looks up the existing provider in AWS.
+# Must be created manually (or via bootstrap) before applying this module.
+data "aws_iam_openid_connect_provider" "github_actions" {
+  url = "https://token.actions.githubusercontent.com"
 }
 
 # IAM role that GitHub Actions workflows assume via OIDC.
@@ -130,7 +125,7 @@ resource "aws_iam_role" "github_actions" {
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Federated = aws_iam_openid_connect_provider.github_actions.arn }
+      Principal = { Federated = data.aws_iam_openid_connect_provider.github_actions.arn }
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {
@@ -201,7 +196,7 @@ resource "aws_iam_role" "github_actions_terraform" {
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Federated = aws_iam_openid_connect_provider.github_actions.arn }
+      Principal = { Federated = data.aws_iam_openid_connect_provider.github_actions.arn }
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {
