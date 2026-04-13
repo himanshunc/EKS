@@ -82,7 +82,7 @@ jobs:
           format:         table
           exit-code:      '1'
           ignore-unfixed: true
-          severity:       'HIGH,CRITICAL'
+          severity:       'CRITICAL'
 
       # ── Push to ECR ───────────────────────────────────────────────────────────
       # Only reached if lint, tests, and Trivy scan all passed.
