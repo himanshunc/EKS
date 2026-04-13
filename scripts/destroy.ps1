@@ -47,6 +47,22 @@ kubectl get applications -n argocd -o name 2>$null | ForEach-Object {
 }
 Write-Host "Done." -ForegroundColor Green
 
+# ── Pre-destroy: remove EKS access entries (standalone resources in main.tf) ──
+# These are not inside any module so the module loop won't catch them.
+# Destroy them first (before eks module) to avoid dependency errors.
+Write-Host ""
+Write-Host "Destroying EKS access entries..." -ForegroundColor Yellow
+terraform destroy `
+    -target="aws_eks_access_policy_association.github_actions_terraform" `
+    -target="aws_eks_access_entry.github_actions_terraform" `
+    -auto-approve
+if ($LASTEXITCODE -ne 0) {
+    Pop-Location
+    Write-Host "ERROR: Failed to destroy EKS access entries" -ForegroundColor Red
+    exit 1
+}
+Write-Host "Done." -ForegroundColor Green
+
 foreach ($mod in $Modules) {
     Write-Host ""
     Write-Host "Destroying module.$mod..." -ForegroundColor Yellow
@@ -73,6 +89,25 @@ foreach ($mod in $Modules) {
 }
 
 Pop-Location
+
+# ── Post-destroy: delete AWS-auto-created CloudWatch log groups ───────────────
+# EKS creates /aws/eks/<cluster>/cluster automatically — Terraform never manages
+# these so they survive destroy. Delete them explicitly.
+Write-Host ""
+Write-Host "Cleaning up CloudWatch log groups..." -ForegroundColor Cyan
+$LogGroups = aws logs describe-log-groups `
+    --log-group-name-prefix "/aws/eks" `
+    --query "logGroups[*].logGroupName" `
+    --output text --region ap-south-1 2>$null
+if ($LogGroups) {
+    $LogGroups -split "`t" | ForEach-Object {
+        if ($_) {
+            Write-Host "  Deleting log group: $_"
+            aws logs delete-log-group --log-group-name $_ --region ap-south-1 2>$null
+        }
+    }
+}
+Write-Host "Done." -ForegroundColor Green
 
 Write-Host ""
 Write-Host "All modules destroyed." -ForegroundColor Green
