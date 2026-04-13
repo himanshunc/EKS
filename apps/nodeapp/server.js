@@ -13,7 +13,7 @@ function handler(req, res) {
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({
-    message: 'Hello from Node.js - v2!',
+    message: 'Hello from Node.js!',
     version: VERSION,
     path:    req.url,
   }, null, 2));
