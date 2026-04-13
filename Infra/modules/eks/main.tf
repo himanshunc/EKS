@@ -48,10 +48,19 @@ resource "aws_eks_cluster" "this" {
 
 # --- OIDC Provider ---
 
-# Looks up the existing OIDC provider created outside Terraform.
-# The provider must already exist in AWS before applying this module.
-data "aws_iam_openid_connect_provider" "eks" {
+# Fetches the TLS thumbprint from the EKS OIDC issuer URL
+data "tls_certificate" "eks" {
   url = aws_eks_cluster.this.identity[0].oidc[0].issuer
+}
+
+# Created per-cluster — each EKS cluster gets its own OIDC provider URL.
+# Required for IRSA to work (links Kubernetes service accounts to IAM roles).
+resource "aws_iam_openid_connect_provider" "eks" {
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [data.tls_certificate.eks.certificates[0].sha1_fingerprint]
+  url             = aws_eks_cluster.this.identity[0].oidc[0].issuer
+
+  tags = var.tags
 }
 
 # --- vpc-cni addon ---

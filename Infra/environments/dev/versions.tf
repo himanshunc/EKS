@@ -14,7 +14,11 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.10"
     }
-# grafana provider is not used in Terraform - AMG data sources are configured manually.
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    # grafana provider is not used in Terraform - AMG data sources are configured manually.
     # Add it back here if you want to manage Grafana resources via Terraform in future.
   }
 }

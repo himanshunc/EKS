@@ -20,7 +20,7 @@ output "cluster_version" {
 
 output "oidc_provider_arn" {
   description = "ARN of the OIDC provider — used in IRSA trust policies in the iam module"
-  value       = data.aws_iam_openid_connect_provider.eks.arn
+  value       = aws_iam_openid_connect_provider.eks.arn
 }
 
 output "oidc_provider" {
