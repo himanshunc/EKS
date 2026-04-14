@@ -23,7 +23,7 @@ function handler(req, res) {
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({
-    message: `Hello from ${APP_NAME}!`,
+    message: `Hello from ${APP_NAME} - v2!`,
     version: VERSION,
     path:    req.url,
   }, null, 2));
