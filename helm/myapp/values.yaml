@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# values.yaml — default values for all environments
+#
+# HOW CI UPDATES THIS FILE:
+#   CI builds a new Docker image, tags it with the git SHA, then runs:
+#     sed -i "s/^  tag:.*/  tag: <SHA>/" helm/myapp/values.yaml
+#   ArgoCD detects the commit and rolls out the new image automatically.
+# ─────────────────────────────────────────────────────────────────────────────
+
+replicaCount: 2
+
+image:
+  repository: 500849274222.dkr.ecr.ap-south-1.amazonaws.com/gitops-dev-api
+  pullPolicy: IfNotPresent
+  # CI updates this tag on every successful build
+  tag: latest
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+  hosts:
+    - host: ""       # empty = ALB accepts on its auto-generated DNS name
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+# Horizontal Pod Autoscaler
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+# Environment variables passed to the container
+env:
+  APP_NAME: myapp
+  PORT: "3000"
+
+# Liveness and readiness probes
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 15
+  readiness:
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 10

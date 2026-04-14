@@ -1,0 +1,102 @@
+name: CI — myapp
+
+# Triggers on changes to the app source.
+# Does NOT trigger on changes to helm/ — those are GitOps state, not source code.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/myapp/**"
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # OIDC token for AWS auth (no static keys)
+  contents: write   # push image tag update back to main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── Lint ──────────────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dev dependencies
+        run: npm install
+        working-directory: apps/myapp
+
+      - name: Lint
+        run: npm run lint
+        working-directory: apps/myapp
+
+      # ── Unit Tests ────────────────────────────────────────────────────────
+      - name: Unit tests
+        run: npm test
+        working-directory: apps/myapp
+
+      # ── Build Docker image ────────────────────────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          IMAGE="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/gitops-dev-api"
+
+          docker build -t ${IMAGE}:${SHA} -t ${IMAGE}:latest apps/myapp/
+
+          echo "IMAGE_TAG=${SHA}"            >> $GITHUB_ENV
+          echo "IMAGE_FULL=${IMAGE}:${SHA}"  >> $GITHUB_ENV
+          echo "IMAGE_LATEST=${IMAGE}:latest" >> $GITHUB_ENV
+
+      # ── Security Scan ─────────────────────────────────────────────────────
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref:      ${{ env.IMAGE_FULL }}
+          format:         table
+          exit-code:      '1'
+          ignore-unfixed: true
+          severity:       'CRITICAL'
+
+      # ── Push to ECR ───────────────────────────────────────────────────────
+      - name: Push image to ECR
+        run: |
+          docker push ${{ env.IMAGE_FULL }}
+          docker push ${{ env.IMAGE_LATEST }}
+
+      # ── Update Helm values ────────────────────────────────────────────────
+      # This is the GitOps step — instead of editing a raw deployment.yaml,
+      # we update only the image tag in values.yaml.
+      # ArgoCD detects this commit, re-renders the Helm chart, and rolls out
+      # the new version automatically. Git is the source of truth.
+      - name: Update image tag in Helm values
+        run: |
+          sed -i "s/^  tag:.*/  tag: ${{ env.IMAGE_TAG }}/" helm/myapp/values.yaml
+
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add helm/myapp/values.yaml
+          if git diff --staged --quiet; then
+            echo "No changes — skipping commit"
+          else
+            git commit -m "ci: deploy myapp ${{ env.IMAGE_TAG }} [skip ci]"
+            git pull --rebase origin main
+            git push origin main
+          fi

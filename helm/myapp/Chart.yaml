@@ -1,0 +1,6 @@
+apiVersion: v2
+name: myapp
+description: Sample Node.js app — Helm + ArgoCD GitOps demo
+type: application
+version: 0.1.0      # chart version — bump when chart structure changes
+appVersion: "1.0.0" # app version — informational only, image tag drives the actual version

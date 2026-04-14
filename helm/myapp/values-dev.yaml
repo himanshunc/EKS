@@ -1,0 +1,16 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# values-dev.yaml — dev environment overrides
+#
+# Only override what differs from values.yaml.
+# ArgoCD merges this on top of values.yaml when deploying to dev.
+# ─────────────────────────────────────────────────────────────────────────────
+
+replicaCount: 1   # single replica in dev — saves resources
+
+hpa:
+  enabled: false  # no autoscaling in dev
+
+env:
+  APP_NAME: myapp
+  APP_VERSION: dev
+  PORT: "3000"

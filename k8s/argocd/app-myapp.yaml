@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/himanshunc/EKS.git
+    targetRevision: main
+    # Path to the Helm chart — ArgoCD renders it and applies the output
+    path: helm/myapp
+    helm:
+      # Merge values-dev.yaml on top of values.yaml.
+      # values.yaml     = defaults (image tag, resources, probes)
+      # values-dev.yaml = dev overrides (1 replica, no HPA)
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: myapp
+  syncPolicy:
+    automated:
+      prune: true       # delete resources removed from the chart
+      selfHeal: true    # revert any manual kubectl changes
+    syncOptions:
+      - CreateNamespace=true
