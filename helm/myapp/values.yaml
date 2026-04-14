@@ -13,7 +13,7 @@ image:
   repository: 500849274222.dkr.ecr.ap-south-1.amazonaws.com/gitops-dev-api
   pullPolicy: IfNotPresent
   # CI updates this tag on every successful build
-  tag: 82bd088
+  tag: 082022d
 
 nameOverride: ""
 fullnameOverride: ""
