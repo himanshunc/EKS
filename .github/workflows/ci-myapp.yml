@@ -2,21 +2,16 @@ name: CI — myapp
 
 # Triggers on changes to the app source.
 # Does NOT trigger on changes to helm/ — those are GitOps state, not source code.
-#
-# Branch → Environment mapping:
-#   develop → dev  (updates helm/myapp/values-dev.yaml)
-#   main    → prod (updates helm/myapp/values-prod.yaml)
-
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     paths:
       - "apps/myapp/**"
   workflow_dispatch:
 
 permissions:
   id-token: write   # OIDC token for AWS auth (no static keys)
-  contents: write   # push image tag update back to branch
+  contents: write   # push image tag update back to main
 
 jobs:
   build:
@@ -27,19 +22,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # ── Detect Environment ─────────────────────────────────────────────────
-      # develop → dev, main → prod
-      # Sets ENV and VALUES_FILE used in later steps.
-      - name: Set environment
-        run: |
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "ENV=prod"                                  >> $GITHUB_ENV
-            echo "VALUES_FILE=helm/myapp/values-prod.yaml"  >> $GITHUB_ENV
-          else
-            echo "ENV=dev"                                   >> $GITHUB_ENV
-            echo "VALUES_FILE=helm/myapp/values-dev.yaml"   >> $GITHUB_ENV
-          fi
 
       # ── Lint ──────────────────────────────────────────────────────────────
       - name: Setup Node.js
@@ -75,15 +57,11 @@ jobs:
           SHA=$(git rev-parse --short HEAD)
           IMAGE="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/gitops-dev-api"
 
-          # Tag with env prefix so dev and prod images are clearly distinguishable in ECR
-          docker build \
-            -t ${IMAGE}:${{ env.ENV }}-${SHA} \
-            -t ${IMAGE}:${{ env.ENV }}-latest \
-            apps/myapp/
+          docker build -t ${IMAGE}:${SHA} -t ${IMAGE}:latest apps/myapp/
 
-          echo "IMAGE_TAG=${{ env.ENV }}-${SHA}"                  >> $GITHUB_ENV
-          echo "IMAGE_FULL=${IMAGE}:${{ env.ENV }}-${SHA}"        >> $GITHUB_ENV
-          echo "IMAGE_LATEST=${IMAGE}:${{ env.ENV }}-latest"      >> $GITHUB_ENV
+          echo "IMAGE_TAG=${SHA}"            >> $GITHUB_ENV
+          echo "IMAGE_FULL=${IMAGE}:${SHA}"  >> $GITHUB_ENV
+          echo "IMAGE_LATEST=${IMAGE}:latest" >> $GITHUB_ENV
 
       # ── Security Scan ─────────────────────────────────────────────────────
       - name: Scan image with Trivy
@@ -102,22 +80,23 @@ jobs:
           docker push ${{ env.IMAGE_LATEST }}
 
       # ── Update Helm values ────────────────────────────────────────────────
-      # Updates the image tag in the environment-specific values file.
-      # develop → values-dev.yaml, main → values-prod.yaml
-      # ArgoCD detects the commit on the branch and rolls out the new version.
+      # This is the GitOps step — instead of editing a raw deployment.yaml,
+      # we update only the image tag in values.yaml.
+      # ArgoCD detects this commit, re-renders the Helm chart, and rolls out
+      # the new version automatically. Git is the source of truth.
       - name: Update image tag in Helm values
         run: |
-          sed -i "s/^  tag:.*/  tag: ${{ env.IMAGE_TAG }}/" ${{ env.VALUES_FILE }}
+          sed -i "s/^  tag:.*/  tag: ${{ env.IMAGE_TAG }}/" helm/myapp/values.yaml
 
       - name: Commit and push
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ${{ env.VALUES_FILE }}
+          git add helm/myapp/values.yaml
           if git diff --staged --quiet; then
             echo "No changes — skipping commit"
           else
-            git commit -m "ci: deploy myapp ${{ env.IMAGE_TAG }} [${{ env.ENV }}] [skip ci]"
-            git pull --rebase origin ${{ github.ref_name }}
-            git push origin ${{ github.ref_name }}
+            git commit -m "ci: deploy myapp ${{ env.IMAGE_TAG }} [skip ci]"
+            git pull --rebase origin main
+            git push origin main
           fi
