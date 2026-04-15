@@ -1,15 +1,23 @@
 name: CI — Nodeapp
 
+# Branch → Environment mapping:
+#   develop → dev  (image tag: dev-SHA, updates k8s/nodeapp/deployment.yaml)
+#   main    → prod (image tag: prod-SHA, updates k8s/nodeapp/deployment.yaml)
+#
+# NOTE: nodeapp uses raw manifests (single deployment.yaml).
+# For full env isolation with separate manifest files per env,
+# see the multi-repo setup (new project).
+
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "apps/nodeapp/**"
-  workflow_dispatch:   # allows manual trigger from GitHub Actions UI
+  workflow_dispatch:
 
 permissions:
   id-token: write   # OIDC token for AWS auth
-  contents: write   # push manifest update back to main
+  contents: write   # push manifest update back to branch
 
 jobs:
   build:
@@ -21,10 +29,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ── Lint ──────────────────────────────────────────────────────────────────
-      # ESLint checks for syntax errors, undefined variables, and style issues.
-      # Runs before building to catch code problems cheaply.
+      # ── Detect Environment ─────────────────────────────────────────────────
+      - name: Set environment
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "ENV=prod" >> $GITHUB_ENV
+          else
+            echo "ENV=dev"  >> $GITHUB_ENV
+          fi
 
+      # ── Lint ──────────────────────────────────────────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -38,18 +52,12 @@ jobs:
         run: npm run lint
         working-directory: apps/nodeapp
 
-      # ── Unit Tests ────────────────────────────────────────────────────────────
-      # Uses Node.js built-in test runner (node --test) — no extra packages needed.
-      # Tests call the handler function directly, no HTTP server required.
-
+      # ── Unit Tests ────────────────────────────────────────────────────────
       - name: Unit tests
         run: npm test
         working-directory: apps/nodeapp
 
-      # ── Build Docker image ────────────────────────────────────────────────────
-      # Build the image locally first so Trivy can scan it before it's pushed.
-      # Image is not pushed to ECR yet at this point.
-
+      # ── Build Docker image ────────────────────────────────────────────────
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -64,18 +72,17 @@ jobs:
           SHA=$(git rev-parse --short HEAD)
           IMAGE="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/gitops-dev-worker"
 
-          docker build -t ${IMAGE}:${SHA} -t ${IMAGE}:latest apps/nodeapp/
+          # Tag with env prefix so dev and prod images are clearly distinguishable in ECR
+          docker build \
+            -t ${IMAGE}:${{ env.ENV }}-${SHA} \
+            -t ${IMAGE}:${{ env.ENV }}-latest \
+            apps/nodeapp/
 
-          echo "IMAGE_TAG=${SHA}"   >> $GITHUB_ENV
-          echo "IMAGE_FULL=${IMAGE}:${SHA}" >> $GITHUB_ENV
-          echo "IMAGE_LATEST=${IMAGE}:latest" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ env.ENV }}-${SHA}"              >> $GITHUB_ENV
+          echo "IMAGE_FULL=${IMAGE}:${{ env.ENV }}-${SHA}"    >> $GITHUB_ENV
+          echo "IMAGE_LATEST=${IMAGE}:${{ env.ENV }}-latest"  >> $GITHUB_ENV
 
-      # ── Security Scan (Trivy) ─────────────────────────────────────────────────
-      # Scans the freshly built image for HIGH and CRITICAL CVEs.
-      # ignore-unfixed: true  — skips CVEs that have no patch available yet.
-      # exit-code: 1          — fails the build if any fixable HIGH/CRITICAL found.
-      # The push step below only runs if this step passes.
-
+      # ── Security Scan ─────────────────────────────────────────────────────
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
@@ -85,18 +92,13 @@ jobs:
           ignore-unfixed: true
           severity:       'CRITICAL'
 
-      # ── Push to ECR ───────────────────────────────────────────────────────────
-      # Only reached if lint, tests, and Trivy scan all passed.
-
+      # ── Push to ECR ───────────────────────────────────────────────────────
       - name: Push image to ECR
         run: |
           docker push ${{ env.IMAGE_FULL }}
           docker push ${{ env.IMAGE_LATEST }}
 
-      # ── Update manifest ───────────────────────────────────────────────────────
-      # Replaces the image tag in deployment.yaml with the new SHA.
-      # ArgoCD detects this commit and rolls out the new version automatically.
-
+      # ── Update manifest ───────────────────────────────────────────────────
       - name: Update manifest
         run: |
           sed -i "s|image: .*gitops-dev-worker:.*|image: ${{ env.IMAGE_FULL }}|" k8s/nodeapp/deployment.yaml
@@ -109,7 +111,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No manifest changes — skipping commit"
           else
-            git commit -m "ci: deploy nodeapp ${{ env.IMAGE_TAG }} [skip ci]"
-            git pull --rebase origin main
-            git push origin main
+            git commit -m "ci: deploy nodeapp ${{ env.IMAGE_TAG }} [${{ env.ENV }}] [skip ci]"
+            git pull --rebase origin ${{ github.ref_name }}
+            git push origin ${{ github.ref_name }}
           fi
